@@ -59,6 +59,7 @@ client.on('messageCreate', async message => {
     }
 });
 
+// ================= INTERACTIONS =================
 client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.isButton()) return;
 
@@ -74,8 +75,28 @@ client.on(Events.InteractionCreate, async interaction => {
         const guild = interaction.guild;
         const channelName = `ticket-${interaction.user.id}`;
 
-        const existing = guild.channels.cache.find(c => c.name === channelName);
+        // --------------- Anti-duplicate e cooldown ---------------
+        if (!client.ticketCooldown) client.ticketCooldown = new Map();
 
+        const cooldownKey = `${interaction.user.id}-${ticketType}`;
+        const lastOpened = client.ticketCooldown.get(cooldownKey);
+
+        const COOLDOWN_MINUTES = 5;
+
+        if (lastOpened) {
+            const diff = (Date.now() - lastOpened) / 1000 / 60;
+            if (diff < COOLDOWN_MINUTES) {
+                return interaction.editReply({
+                    content: `⚠️ You must wait ${Math.ceil(COOLDOWN_MINUTES - diff)} more minute(s) before opening another ${ticketType} ticket.`
+                });
+            }
+        }
+
+        client.ticketCooldown.set(cooldownKey, Date.now());
+        // ------------------------------------------------------------
+
+        // Previene duplicati
+        const existing = guild.channels.cache.find(c => c.name === channelName);
         if (existing) {
             return interaction.editReply({
                 content: `⚠️ You already have an open ticket: ${existing}`
@@ -83,23 +104,11 @@ client.on(Events.InteractionCreate, async interaction => {
         }
 
         const permissionOverwrites = [
-            {
-                id: guild.roles.everyone,
-                deny: [PermissionsBitField.Flags.ViewChannel]
-            },
-            {
-                id: interaction.user.id,
-                allow: [
-                    PermissionsBitField.Flags.ViewChannel,
-                    PermissionsBitField.Flags.SendMessages
-                ]
-            },
+            { id: guild.roles.everyone, deny: [PermissionsBitField.Flags.ViewChannel] },
+            { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
             ...STAFF_ROLES.map(roleId => ({
                 id: roleId,
-                allow: [
-                    PermissionsBitField.Flags.ViewChannel,
-                    PermissionsBitField.Flags.SendMessages
-                ]
+                allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages]
             }))
         ];
 
@@ -143,11 +152,11 @@ client.on(Events.InteractionCreate, async interaction => {
 
         await interaction.deferReply({ ephemeral: true });
 
-        let timeLeft = 600;
+        let timeLeft = 60; // 1 minuto = 60 secondi
 
         const countdownEmbed = new EmbedBuilder()
             .setTitle('🔒 Ticket Closing')
-            .setDescription(`Closing in **10:00**`)
+            .setDescription(`Closing in **01:00**`)
             .setColor(0xFF0000);
 
         const timerMessage = await interaction.channel.send({ embeds: [countdownEmbed] });
@@ -171,9 +180,10 @@ client.on(Events.InteractionCreate, async interaction => {
         }, 1000);
 
         return interaction.editReply({
-            content: '⏳ Closing timer started (10 minutes).'
+            content: '⏳ Closing timer started (1 minute).'
         });
     }
 });
 
+// ================= LOGIN =================
 client.login(process.env.TOKEN);
