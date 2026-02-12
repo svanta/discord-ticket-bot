@@ -1,3 +1,4 @@
+// Yeah the code is written by chat gpt, SORRY GUYS I ONLY KNOW C# PYTHON AND LUA 
 const {
     Client,
     GatewayIntentBits,
@@ -19,22 +20,26 @@ const client = new Client({
 });
 
 // ================= CONFIG =================
-const TICKET_CATEGORY_ID = '1471213191991267550';
-const STAFF_ROLES = ['1447187404032315392', '1471213896206385191'];
+const ALLOWED_GUILDS = ['1446462557832347674']; // 🔴 INSERT YOUR SERVER ID
+const TICKET_CATEGORY_ID = '1471213191991267550'; // Your category ID
+const STAFF_ROLES = ['1447187404032315392', '1471213896206385191']; // Staff roles
+const COOLDOWN_MINUTES = 5;
 // ==========================================
 
-client.once('ready', () => {
+client.once('clientReady', () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
 });
 
-client.on('messageCreate', async message => {
+// ================= MESSAGE COMMAND =================
+client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
+    if (!ALLOWED_GUILDS.includes(message.guildId)) return;
 
     if (message.content === '!ticket') {
 
         const embed = new EmbedBuilder()
             .setTitle('🎟️ Support Center')
-            .setDescription('Click a button below to open a private support ticket.')
+            .setDescription('Choose one option below to open a private ticket.')
             .setColor(0x00BFFF)
             .setTimestamp();
 
@@ -50,7 +55,17 @@ client.on('messageCreate', async message => {
             .setStyle(ButtonStyle.Secondary)
             .setEmoji('📩');
 
-        const row = new ActionRowBuilder().addComponents(generalButton, otherButton);
+        const staffButton = new ButtonBuilder()
+            .setCustomId('ticket_staff')
+            .setLabel('Apply for Staff')
+            .setStyle(ButtonStyle.Primary)
+            .setEmoji('⭐');
+
+        const row = new ActionRowBuilder().addComponents(
+            generalButton,
+            otherButton,
+            staffButton
+        );
 
         await message.channel.send({
             embeds: [embed],
@@ -60,59 +75,81 @@ client.on('messageCreate', async message => {
 });
 
 // ================= INTERACTIONS =================
-client.on(Events.InteractionCreate, async interaction => {
+client.ticketCooldown = new Map();
+
+client.on(Events.InteractionCreate, async (interaction) => {
+
     if (!interaction.isButton()) return;
+    if (!ALLOWED_GUILDS.includes(interaction.guildId)) return;
 
     // ================= OPEN TICKET =================
-    if (interaction.customId === 'ticket_general' || interaction.customId === 'ticket_other') {
+    if (interaction.customId.startsWith('ticket_')) {
 
-        await interaction.deferReply({ ephemeral: true });
+        if (interaction.customId === 'ticket_close') return;
 
-        const ticketType = interaction.customId === 'ticket_general'
-            ? 'General Support'
-            : 'Other Issue';
+        await interaction.reply({
+            content: 'Creating your ticket...',
+            flags: 64
+        });
 
-        const guild = interaction.guild;
-        const channelName = `ticket-${interaction.user.id}`;
+        const ticketTypes = {
+            ticket_general: 'general',
+            ticket_other: 'other',
+            ticket_staff: 'staff-application'
+        };
 
-        // --------------- Anti-duplicate e cooldown ---------------
-        if (!client.ticketCooldown) client.ticketCooldown = new Map();
+        const type = ticketTypes[interaction.customId];
+        const channelName = `${type}-${interaction.user.id}`;
 
-        const cooldownKey = `${interaction.user.id}-${ticketType}`;
+        // -------- ANTI DUPLICATE --------
+        const existingChannel = interaction.guild.channels.cache.find(
+            c => c.name === channelName
+        );
+
+        if (existingChannel) {
+            return interaction.editReply({
+                content: `⚠️ You already have an open ${type} ticket: ${existingChannel}`
+            });
+        }
+
+        // -------- COOLDOWN --------
+        const cooldownKey = `${interaction.user.id}-${type}`;
         const lastOpened = client.ticketCooldown.get(cooldownKey);
-
-        const COOLDOWN_MINUTES = 5;
 
         if (lastOpened) {
             const diff = (Date.now() - lastOpened) / 1000 / 60;
             if (diff < COOLDOWN_MINUTES) {
                 return interaction.editReply({
-                    content: `⚠️ You must wait ${Math.ceil(COOLDOWN_MINUTES - diff)} more minute(s) before opening another ${ticketType} ticket.`
+                    content: `⏳ You must wait ${Math.ceil(COOLDOWN_MINUTES - diff)} more minute(s) before opening another ${type} ticket.`
                 });
             }
         }
 
         client.ticketCooldown.set(cooldownKey, Date.now());
-        // ------------------------------------------------------------
 
-        // Previene duplicati
-        const existing = guild.channels.cache.find(c => c.name === channelName);
-        if (existing) {
-            return interaction.editReply({
-                content: `⚠️ You already have an open ticket: ${existing}`
-            });
-        }
-
+        // -------- CREATE CHANNEL --------
         const permissionOverwrites = [
-            { id: guild.roles.everyone, deny: [PermissionsBitField.Flags.ViewChannel] },
-            { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
+            {
+                id: interaction.guild.roles.everyone,
+                deny: [PermissionsBitField.Flags.ViewChannel]
+            },
+            {
+                id: interaction.user.id,
+                allow: [
+                    PermissionsBitField.Flags.ViewChannel,
+                    PermissionsBitField.Flags.SendMessages
+                ]
+            },
             ...STAFF_ROLES.map(roleId => ({
                 id: roleId,
-                allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages]
+                allow: [
+                    PermissionsBitField.Flags.ViewChannel,
+                    PermissionsBitField.Flags.SendMessages
+                ]
             }))
         ];
 
-        const ticketChannel = await guild.channels.create({
+        const channel = await interaction.guild.channels.create({
             name: channelName,
             type: ChannelType.GuildText,
             parent: TICKET_CATEGORY_ID,
@@ -120,11 +157,11 @@ client.on(Events.InteractionCreate, async interaction => {
         });
 
         const embed = new EmbedBuilder()
-            .setTitle(`📨 ${ticketType}`)
+            .setTitle(`📩 ${type.toUpperCase()} TICKET`)
             .setDescription(
-                `Welcome <@${interaction.user.id}> 👋\n\n` +
-                `Describe your issue clearly.\n\n` +
-                `Press 🔒 when finished.`
+                `Hello <@${interaction.user.id}> 👋\n\n` +
+                `Please describe your request clearly.\n\n` +
+                `Press 🔒 when you are done.`
             )
             .setColor(0x00BFFF)
             .setTimestamp();
@@ -137,51 +174,34 @@ client.on(Events.InteractionCreate, async interaction => {
 
         const row = new ActionRowBuilder().addComponents(closeButton);
 
-        await ticketChannel.send({
+        await channel.send({
             embeds: [embed],
             components: [row]
         });
 
-        return interaction.editReply({
-            content: `✅ Ticket created: ${ticketChannel}`
+        await interaction.editReply({
+            content: `✅ Your ticket has been created: ${channel}`
         });
     }
 
     // ================= CLOSE TICKET =================
     if (interaction.customId === 'ticket_close') {
 
-        await interaction.deferReply({ ephemeral: true });
-
-        let timeLeft = 60; // 1 minuto = 60 secondi
-
-        const countdownEmbed = new EmbedBuilder()
-            .setTitle('🔒 Ticket Closing')
-            .setDescription(`Closing in **01:00**`)
-            .setColor(0xFF0000);
-
-        const timerMessage = await interaction.channel.send({ embeds: [countdownEmbed] });
-
-        const interval = setInterval(async () => {
-
-            timeLeft--;
-
-            const minutes = Math.floor(timeLeft / 60);
-            const seconds = timeLeft % 60;
-            const formatted = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-
-            countdownEmbed.setDescription(`Closing in **${formatted}**`);
-            await timerMessage.edit({ embeds: [countdownEmbed] });
-
-            if (timeLeft <= 0) {
-                clearInterval(interval);
-                await interaction.channel.delete().catch(() => {});
-            }
-
-        }, 1000);
-
-        return interaction.editReply({
-            content: '⏳ Closing timer started (1 minute).'
+        await interaction.reply({
+            content: '⏳ This ticket will close in 1 minute.',
+            flags: 64
         });
+
+        setTimeout(async () => {
+            try {
+                const channel = await interaction.guild.channels.fetch(interaction.channelId);
+                if (channel) {
+                    await channel.delete().catch(() => {});
+                }
+            } catch (err) {
+                console.log('Channel already deleted or not found.');
+            }
+        }, 60000); // 1 minute
     }
 });
 
