@@ -1,5 +1,4 @@
 //YEAH IK THE CODE IS WRITTEN BY CHAT GPT, I ONLY KNOW LUA, C# AND PYTHON SORRYYY
-
 const {
     Client,
     GatewayIntentBits,
@@ -11,6 +10,7 @@ const {
     ChannelType,
     EmbedBuilder
 } = require('discord.js');
+const http = require('http');
 
 // ================= CLIENT =================
 const client = new Client({
@@ -22,11 +22,10 @@ const client = new Client({
 });
 
 // ================= CONFIG =================
-const ALLOWED_GUILDS = ['1446462557832347674']; // 🔴 INSERT YOUR SERVER ID
+const ALLOWED_GUILDS = ['1446462557832347674']; // INSERT YOUR SERVER ID
 const TICKET_CATEGORY_ID = '1471213191991267550'; // Category ID
 const STAFF_ROLES = ['1447187404032315392', '1471213896206385191']; // Staff role IDs
 const COOLDOWN_MINUTES = 5;
-// ==========================================
 
 client.ticketCooldown = new Map();
 
@@ -35,10 +34,7 @@ client.once('clientReady', () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
 
     client.user.setPresence({
-        activities: [{
-            name: 'Cat Music',
-            type: 2 // Listening
-        }],
+        activities: [{ name: 'Cat music lowkey tuff', type: 2 }],
         status: 'online'
     });
 });
@@ -49,7 +45,6 @@ client.on('messageCreate', async (message) => {
     if (!ALLOWED_GUILDS.includes(message.guildId)) return;
 
     if (message.content === '!ticket') {
-
         const embed = new EmbedBuilder()
             .setTitle('🎟️ Support Center')
             .setDescription('Choose an option below to open a private ticket.')
@@ -80,36 +75,34 @@ client.on('messageCreate', async (message) => {
             staffButton
         );
 
-        await message.channel.send({
-            embeds: [embed],
-            components: [row]
-        });
+        await message.channel.send({ embeds: [embed], components: [row] });
     }
 });
 
 // ================= INTERACTIONS =================
 client.on(Events.InteractionCreate, async (interaction) => {
-
     if (!interaction.isButton()) return;
     if (!ALLOWED_GUILDS.includes(interaction.guildId)) return;
 
     // ================= CLOSE TICKET =================
     if (interaction.customId === 'ticket_close') {
+        try {
+            await interaction.reply({
+                content: '⏳ This ticket will close in 1 minute.',
+                flags: 64
+            });
 
-        await interaction.reply({
-            content: '⏳ This ticket will close in 1 minute.',
-            flags: 64
-        });
-
-        setTimeout(async () => {
-            try {
-                const channel = await interaction.guild.channels.fetch(interaction.channelId);
-                if (channel) await channel.delete().catch(() => {});
-            } catch (err) {
-                console.log('Channel already deleted or not found.');
-            }
-        }, 60000);
-
+            setTimeout(async () => {
+                try {
+                    const channel = await interaction.guild.channels.fetch(interaction.channelId);
+                    if (channel) await channel.delete().catch(() => {});
+                } catch {
+                    console.log('Channel already deleted or not found.');
+                }
+            }, 60000);
+        } catch {
+            console.log('Interaction already replied or failed.');
+        }
         return;
     }
 
@@ -123,22 +116,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const type = ticketTypes[interaction.customId];
     if (!type) return;
 
-    await interaction.reply({
-        content: 'Creating your ticket...',
-        flags: 64
-    });
+    try {
+        await interaction.reply({ content: 'Creating your ticket...', flags: 64 });
+    } catch {}
 
     const channelName = `${type}-${interaction.user.id}`;
 
     // -------- ANTI DUPLICATE --------
-    const existingChannel = interaction.guild.channels.cache.find(
-        c => c.name === channelName
-    );
+    let existingChannel;
+    try {
+        existingChannel = await interaction.guild.channels.fetch();
+        existingChannel = interaction.guild.channels.cache.find(c => c.name === channelName);
+    } catch {}
 
     if (existingChannel) {
         return interaction.editReply({
             content: `⚠️ You already have an open ${type} ticket: ${existingChannel}`
-        });
+        }).catch(() => {});
     }
 
     // -------- COOLDOWN --------
@@ -150,48 +144,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (diff < COOLDOWN_MINUTES) {
             return interaction.editReply({
                 content: `⏳ You must wait ${Math.ceil(COOLDOWN_MINUTES - diff)} more minute(s) before opening another ${type} ticket.`
-            });
+            }).catch(() => {});
         }
     }
-
     client.ticketCooldown.set(cooldownKey, Date.now());
 
     // -------- CREATE CHANNEL --------
     const permissionOverwrites = [
-        {
-            id: interaction.guild.roles.everyone,
-            deny: [PermissionsBitField.Flags.ViewChannel]
-        },
-        {
-            id: interaction.user.id,
-            allow: [
-                PermissionsBitField.Flags.ViewChannel,
-                PermissionsBitField.Flags.SendMessages
-            ]
-        },
+        { id: interaction.guild.roles.everyone, deny: [PermissionsBitField.Flags.ViewChannel] },
+        { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
         ...STAFF_ROLES.map(roleId => ({
             id: roleId,
-            allow: [
-                PermissionsBitField.Flags.ViewChannel,
-                PermissionsBitField.Flags.SendMessages
-            ]
+            allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages]
         }))
     ];
 
-    const channel = await interaction.guild.channels.create({
-        name: channelName,
-        type: ChannelType.GuildText,
-        parent: TICKET_CATEGORY_ID,
-        permissionOverwrites
-    });
+    let channel;
+    try {
+        channel = await interaction.guild.channels.create({
+            name: channelName,
+            type: ChannelType.GuildText,
+            parent: TICKET_CATEGORY_ID,
+            permissionOverwrites
+        });
+    } catch (err) {
+        console.log('Failed to create channel:', err);
+        return interaction.editReply({ content: '❌ Failed to create ticket.' }).catch(() => {});
+    }
 
     const embed = new EmbedBuilder()
         .setTitle(`📩 ${type.toUpperCase()} TICKET`)
-        .setDescription(
-            `Hello <@${interaction.user.id}> 👋\n\n` +
-            `Please describe your request clearly.\n\n` +
-            `Press 🔒 when you are done.`
-        )
+        .setDescription(`Hello <@${interaction.user.id}> 👋\nPlease describe your request clearly.\nPress 🔒 when done.`)
         .setColor(0x00BFFF)
         .setTimestamp();
 
@@ -203,22 +186,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     const row = new ActionRowBuilder().addComponents(closeButton);
 
-    await channel.send({
-        embeds: [embed],
-        components: [row]
-    });
+    await channel.send({ embeds: [embed], components: [row] }).catch(() => {});
 
     await interaction.editReply({
         content: `✅ Your ticket has been created: ${channel}`
-    });
+    }).catch(() => {});
 });
 
 // ================= LOGIN =================
 client.login(process.env.TOKEN);
 
-// ================= RENDER WEB SERVICE FIX =================
-const http = require('http');
-
+// ================= RENDER FREE WEB SERVICE FIX =================
 http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Bot is running.');
